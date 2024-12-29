@@ -1,0 +1,10 @@
+[package]
+name = "nu_plugin_unzip"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chrono = { version = "0.4.39" , features = ["clock"]}
+nu-plugin = "0.*"
+nu-protocol = { version = "0.*", features = ["plugin"] }
+zip = { version = "2.*", features = ["chrono"] }
