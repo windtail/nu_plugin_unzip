@@ -1,7 +1,7 @@
 use nu_plugin::Plugin;
 use nu_plugin::PluginCommand;
 use nu_protocol::{
-    Category, LabeledError, PipelineData, Record, ShellError, Signature, Span, SyntaxShape, Type,
+    Category, LabeledError, PipelineData, Record, Signature, Span, SyntaxShape, Type,
     Value,
 };
 use std::io::{Read, Write};
@@ -29,7 +29,9 @@ impl UnzipCommand {
                     match field {
                         ExtraField::ExtendedTimestamp(timestamp_) => {
                             timestamp = timestamp_.mod_time();
+                            break
                         }
+                        _ => {}
                     }
                 }
                 let last_modified: chrono::DateTime<chrono::Local> = match timestamp {
@@ -81,21 +83,33 @@ impl UnzipCommand {
                 }
 
                 if let Some(out_dir) = out_path.parent() {
-                    std::fs::create_dir_all(out_dir).map_err(ShellError::from)?;
+                    std::fs::create_dir_all(out_dir).map_err(|e| {
+                        let out_dir = out_dir.to_string_lossy();
+                        LabeledError::new(format!("Fail to create {out_dir}")).with_label(e.to_string(), span)
+                    })?;
                 }
 
                 let mut output_file = std::io::BufWriter::new(
-                    std::fs::File::create(&out_path).map_err(ShellError::from)?,
+                    std::fs::File::create(&out_path).map_err(|e| {
+                        let out_path = out_path.to_string_lossy();
+                        LabeledError::new(format!("Fail to create {out_path}")).with_label(e.to_string(), span)
+                    })?,
                 );
                 let mut buffer = [0; 1024];
                 loop {
-                    let bytes_read = file.read(&mut buffer).map_err(ShellError::from)?;
+                    let bytes_read = file.read(&mut buffer).map_err(|e| {
+                        let file_name = file.name();
+                        LabeledError::new(format!("Fail to read {file_name}")).with_label(e.to_string(), span)
+                    })?;
                     if bytes_read == 0 {
                         break;
                     }
                     output_file
                         .write_all(&buffer[0..bytes_read])
-                        .map_err(ShellError::from)?;
+                        .map_err(|e| {
+                            let out_path = out_path.to_string_lossy();
+                            LabeledError::new(format!("Fail to write {out_path}")).with_label(e.to_string(), span)
+                        })?;
                 }
             }
         }
@@ -154,7 +168,9 @@ impl PluginCommand for UnzipCommand {
             zip_file_path
         };
 
-        let zip_file = std::fs::File::open(zip_file_path).map_err(ShellError::from)?;
+        let zip_file = std::fs::File::open(zip_file_path).map_err(|e| {
+            LabeledError::new("Error opening ZIP file").with_label(e.to_string(), call.head)
+        })?;
 
         let mut archive = ZipArchive::new(zip_file).map_err(|e| {
             LabeledError::new("Error reading ZIP file").with_label(e.to_string(), call.head)

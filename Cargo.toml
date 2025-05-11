@@ -1,9 +1,8 @@
 [package]
 name = "nu_plugin_unzip"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "A [nushell](https://www.nushell.sh/) plugin for unzipping files."
-license = "MIT"
 license-file = "LICENSE"
 repository = "https://github.com/windtail/nu_plugin_unzip"
 
