@@ -1,6 +1,6 @@
 [package]
 name = "nu_plugin_unzip"
-version = "0.104.1"
+version = "0.2.1"
 edition = "2021"
 description = "A [nushell](https://www.nushell.sh/) plugin for unzipping files."
 license-file = "LICENSE"

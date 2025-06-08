@@ -61,6 +61,7 @@ impl UnzipCommand {
         span: Span,
         archive: &mut ZipArchive<std::fs::File>,
         force: bool,
+        debug: bool,
         dir: &Path,
     ) -> Result<PipelineData, LabeledError> {
         for i in 0..archive.len() {
@@ -70,6 +71,10 @@ impl UnzipCommand {
                     None => continue,
                 };
 
+                if debug {
+                    eprintln!("Extracting {}", out_path.display());
+                }
+
                 if out_path.exists() && !force {
                     return Err(LabeledError::new(format!(
                         "File {} already exists",
@@ -78,35 +83,44 @@ impl UnzipCommand {
                     .with_label("Use --force/-f to overwrite", span));
                 }
 
-                if let Some(out_dir) = out_path.parent() {
-                    std::fs::create_dir_all(out_dir).map_err(|e| {
-                        let out_dir = out_dir.to_string_lossy();
+                if file.is_dir() {
+                    std::fs::create_dir_all(&out_path).map_err(|e| {
+                        let out_dir = out_path.to_string_lossy();
                         LabeledError::new(format!("Fail to create {out_dir}"))
                             .with_label(e.to_string(), span)
-                    })?;
-                }
-
-                let mut output_file =
-                    std::io::BufWriter::new(std::fs::File::create(&out_path).map_err(|e| {
-                        let out_path = out_path.to_string_lossy();
-                        LabeledError::new(format!("Fail to create {out_path}"))
-                            .with_label(e.to_string(), span)
-                    })?);
-                let mut buffer = [0; 1024];
-                loop {
-                    let bytes_read = file.read(&mut buffer).map_err(|e| {
-                        let file_name = file.name();
-                        LabeledError::new(format!("Fail to read {file_name}"))
-                            .with_label(e.to_string(), span)
-                    })?;
-                    if bytes_read == 0 {
-                        break;
+                    })?;                    
+                } else {
+                    // are all directories already created ?
+                    if let Some(out_dir) = out_path.parent() {
+                        std::fs::create_dir_all(out_dir).map_err(|e| {
+                            let out_dir = out_dir.to_string_lossy();
+                            LabeledError::new(format!("Fail to create {out_dir}"))
+                                .with_label(e.to_string(), span)
+                        })?;
                     }
-                    output_file.write_all(&buffer[0..bytes_read]).map_err(|e| {
-                        let out_path = out_path.to_string_lossy();
-                        LabeledError::new(format!("Fail to write {out_path}"))
-                            .with_label(e.to_string(), span)
-                    })?;
+
+                    let mut output_file =
+                        std::io::BufWriter::new(std::fs::File::create(&out_path).map_err(|e| {
+                            let out_path = out_path.to_string_lossy();
+                            LabeledError::new(format!("Fail to create {out_path}"))
+                                .with_label(e.to_string(), span)
+                        })?);
+                    let mut buffer = [0; 1024];
+                    loop {
+                        let bytes_read = file.read(&mut buffer).map_err(|e| {
+                            let file_name = file.name();
+                            LabeledError::new(format!("Fail to read {file_name}"))
+                                .with_label(e.to_string(), span)
+                        })?;
+                        if bytes_read == 0 {
+                            break;
+                        }
+                        output_file.write_all(&buffer[0..bytes_read]).map_err(|e| {
+                            let out_path = out_path.to_string_lossy();
+                            LabeledError::new(format!("Fail to write {out_path}"))
+                                .with_label(e.to_string(), span)
+                        })?;
+                    }
                 }
             }
         }
@@ -124,11 +138,16 @@ impl PluginCommand for UnzipCommand {
 
     fn signature(&self) -> Signature {
         Signature::build("unzip")
-            .switch("list", "list files in zip file, return table<name, size, modified>", Some('l'))
+            .switch(
+                "list",
+                "list files in zip file, return table<name, size, modified>",
+                Some('l'),
+            )
             .switch("force", "force overwrite", Some('f'))
+            .switch("debug", "print debug information", None)
             .named(
                 "dir",
-                SyntaxShape::Filepath,
+                SyntaxShape::Directory,
                 "the directory to unzip to, default current directory",
                 Some('d'),
             )
@@ -181,6 +200,7 @@ impl PluginCommand for UnzipCommand {
             self.list_files(call.head, &mut archive)
         } else {
             let force = call.has_flag("force")?;
+            let debug = call.has_flag("debug")?;
 
             let current_dir: PathBuf = engine.get_current_dir()?.into();
             let dir = call
@@ -193,7 +213,7 @@ impl PluginCommand for UnzipCommand {
                     }
                 })
                 .unwrap_or_else(|| current_dir);
-            self.unzip_file(call.head, &mut archive, force, &dir)
+            self.unzip_file(call.head, &mut archive, force, debug, &dir)
         }
     }
 }
@@ -421,6 +441,28 @@ mod tests {
         Ok(())
     }
 
+
+    #[test]
+    fn test_unzip_with_folder() -> Result<()> {
+        let files = vec![
+            ("file1.txt".to_string(), b"content1".to_vec()),
+            ("a_dir/file2.txt".to_string(), b"hello content2".to_vec()),
+        ];
+        let modified = now();
+        let zip_file = TempZipFile::new(&files, modified)?;
+        let current_dir = TempDir::new()?;
+
+        let output = make_plugin_with_pwd(current_dir.path())?
+            .eval(&format!("unzip {}", zip_file.path()))?
+            .into_value(Span::test_data())?;
+
+        assert_eq!(output, Value::nothing(Span::test_data()));
+
+        check_extracted_files(&files, current_dir.path());
+
+        Ok(())
+    }
+    
     #[test]
     fn test_unzip_force() -> Result<()> {
         let files = vec![
